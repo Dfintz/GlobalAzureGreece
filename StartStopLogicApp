@@ -1,0 +1,376 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "actions": {
+            "Get_Schedules": {
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/Tables/@{encodeURIComponent('schedules')}/entities",
+                    "queries": {
+                        "$filter": "Active eq 'True'"
+                    }
+                },
+                "runAfter": {
+                    "Initialize_Powerstate": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "Initialize_Powerstate": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Powerstate",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_Report": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_Report": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Report",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "runAfter": {},
+                "type": "InitializeVariable"
+            },
+            "Teams_Report": {
+                "actions": {
+                    "HTTP": {
+                        "inputs": {
+                            "body": "(\n \"Title\": \"Start/Stop Report\"\n \"text: \"@{variables('Report')}\n)",
+                            "method": "POST",
+                            "uri": "https://outlook.office.com/teamswebhook"
+                        },
+                        "runAfter": {},
+                        "type": "Http"
+                    }
+                },
+                "expression": {
+                    "and": [
+                        {
+                            "not": {
+                                "equals": [
+                                    "@empty(variables('report'))",
+                                    "@true"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "VmCheck": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "If"
+            },
+            "VmCheck": {
+                "actions": {
+                    "Filter_array": {
+                        "inputs": {
+                            "from": "@body('List_resources_by_resource_group')?['value']",
+                            "where": "@not(contains(toLower(items('VmCheck')['ExcludeVM']), toLower(item()['name'])))"
+                        },
+                        "runAfter": {
+                            "List_resources_by_resource_group": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Query"
+                    },
+                    "List_resources_by_resource_group": {
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['arm']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/subscriptions/@{encodeURIComponent('6e617337-ad3a-4755-a4f0-b792244c8703')}/resourceGroups/@{encodeURIComponent(items('VmCheck')['PartitionKey'])}/resources",
+                            "queries": {
+                                "$filter": "resourceType eq 'Microsoft.Compute/virtualMachines'",
+                                "x-ms-api-version": "2016-06-01"
+                            }
+                        },
+                        "runAfter": {},
+                        "type": "ApiConnection"
+                    },
+                    "OffHoursCheck": {
+                        "actions": {
+                            "StartVM": {
+                                "actions": {
+                                    "Running_Check": {
+                                        "actions": {
+                                            "StartReport": {
+                                                "inputs": {
+                                                    "name": "Report",
+                                                    "value": "@outputs('StartVmOutput')"
+                                                },
+                                                "runAfter": {
+                                                    "StartVmOutput": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "type": "AppendToArrayVariable"
+                                            },
+                                            "StartVmOutput": {
+                                                "inputs": {
+                                                    "Action": "Start",
+                                                    "RG": "@{items('VmCheck')?['PartitionKey']}",
+                                                    "VM": "@{items('StartVM')?['name']}"
+                                                },
+                                                "runAfter": {
+                                                    "Start_VM": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "type": "Compose"
+                                            },
+                                            "Start_VM": {
+                                                "inputs": {
+                                                    "authentication": {
+                                                        "audience": "https://management.azure.com/",
+                                                        "type": "ManagedServiceIdentity"
+                                                    },
+                                                    "method": "POST",
+                                                    "uri": "https://management.azure.com/@{items('StartVM')?['id']}/start?api-version=2019-07-01"
+                                                },
+                                                "runAfter": {},
+                                                "type": "Http"
+                                            }
+                                        },
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "not": {
+                                                        "contains": [
+                                                            "@variables('Powerstate')",
+                                                            "Powerstate/running"
+                                                        ]
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        "runAfter": {
+                                            "Start_Powerstate_Var": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "If"
+                                    },
+                                    "Start-Powerstate": {
+                                        "inputs": {
+                                            "authentication": {
+                                                "audience": "https://management.azure.com/",
+                                                "type": "ManagedServiceIdentity"
+                                            },
+                                            "method": "GET",
+                                            "uri": "https://management.azure.com/@{items('StartVM')?['id']}/InstanceView?api-version=2019-07-01"
+                                        },
+                                        "runAfter": {},
+                                        "type": "Http"
+                                    },
+                                    "Start_Powerstate_Var": {
+                                        "inputs": {
+                                            "name": "Powerstate",
+                                            "value": "@body('Start-Powerstate')['Statuses']"
+                                        },
+                                        "runAfter": {
+                                            "Start-Powerstate": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "AppendToStringVariable"
+                                    }
+                                },
+                                "foreach": "@body('Filter_array')",
+                                "runAfter": {},
+                                "type": "Foreach"
+                            }
+                        },
+                        "else": {
+                            "actions": {
+                                "StopVM": {
+                                    "actions": {
+                                        "Deallocated_Check": {
+                                            "actions": {
+                                                "StopReport": {
+                                                    "inputs": {
+                                                        "name": "Report",
+                                                        "value": "@outputs('StopVmOutput')"
+                                                    },
+                                                    "runAfter": {
+                                                        "StopVmOutput": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "AppendToArrayVariable"
+                                                },
+                                                "StopVmOutput": {
+                                                    "inputs": {
+                                                        "Action": "Start",
+                                                        "RG": "@{items('VmCheck')?['PartitionKey']}",
+                                                        "VM": "@{items('StopVM')?['name']}"
+                                                    },
+                                                    "runAfter": {
+                                                        "Stop_VM": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Compose"
+                                                },
+                                                "Stop_VM": {
+                                                    "inputs": {
+                                                        "authentication": {
+                                                            "audience": "https://management.azure.com/",
+                                                            "type": "ManagedServiceIdentity"
+                                                        },
+                                                        "method": "POST",
+                                                        "uri": "https://management.azure.com/@{items('StopVM')?['id']}/deallocate?api-version=2019-07-01"
+                                                    },
+                                                    "runAfter": {},
+                                                    "type": "Http"
+                                                }
+                                            },
+                                            "expression": {
+                                                "and": [
+                                                    {
+                                                        "not": {
+                                                            "contains": [
+                                                                "@variables('Powerstate')",
+                                                                "PowerState/deallocated"
+                                                            ]
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            "runAfter": {
+                                                "Stop_Powerstate_Var": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "If"
+                                        },
+                                        "Stop-Powerstate": {
+                                            "inputs": {
+                                                "authentication": {
+                                                    "audience": "https://management.azure.com/",
+                                                    "type": "ManagedServiceIdentity"
+                                                },
+                                                "method": "GET",
+                                                "uri": "https://management.azure.com/@{items('StopVM')?['id']}/InstanceView?api-version=2019-07-01"
+                                            },
+                                            "runAfter": {},
+                                            "type": "Http"
+                                        },
+                                        "Stop_Powerstate_Var": {
+                                            "inputs": {
+                                                "name": "Powerstate",
+                                                "value": "@body('Stop-Powerstate')['Statuses']"
+                                            },
+                                            "runAfter": {
+                                                "Stop-Powerstate": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "AppendToStringVariable"
+                                        }
+                                    },
+                                    "foreach": "@body('Filter_array')",
+                                    "runAfter": {},
+                                    "type": "Foreach"
+                                }
+                            }
+                        },
+                        "expression": {
+                            "and": [
+                                {
+                                    "contains": [
+                                        "@items('VMCheck')['Days']",
+                                        "@utcNow('dddd')"
+                                    ]
+                                },
+                                {
+                                    "greaterOrEquals": [
+                                        "@utcNow('HH:mm')",
+                                        "@items('VMCheck')['Start']"
+                                    ]
+                                },
+                                {
+                                    "lessOrEquals": [
+                                        "@utcNow('HH:mm')",
+                                        "@items('VMCheck')['Stop']"
+                                    ]
+                                }
+                            ]
+                        },
+                        "runAfter": {
+                            "Filter_array": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "If"
+                    }
+                },
+                "foreach": "@body('Get_Schedules')?['value']",
+                "runAfter": {
+                    "Get_Schedules": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Foreach"
+            }
+        },
+        "contentVersion": "1.0.0.0",
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "defaultValue": {},
+                "type": "Object"
+            }
+        },
+        "triggers": {
+            "Recurrence": {
+                "recurrence": {
+                    "frequency": "Minute",
+                    "interval": 30,
+                    "timeZone": "UTC"
+                },
+                "type": "Recurrence"
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "value": {
+                "arm": {
+                    "connectionId": "",
+                    "connectionName": "arm",
+                    "id": ""
+                },
+                "azuretables": {
+                    "connectionId": "",
+                    "connectionName": "azuretables",
+                    "id": ""
+                }
+            }
+        }
+    }
+}
