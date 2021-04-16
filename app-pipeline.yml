@@ -1,0 +1,66 @@
+# A minimal pipeline.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+  paths:
+    include:
+    - AzDevopsRepo/*
+
+variables:
+  # Container registry service connection established during pipeline creation
+  imageRepository: 'Repo Name'
+  containerRegistry: 'ACR Name'
+  appName: 'App Name'
+  tag: '$(Build.BuildId)'
+  namespace: 'Namespace'
+  kubernetesServiceConnection: 'Service Connection'
+
+stages:
+- stage: Build
+  displayName: Build and push Image
+  jobs:  
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: Docker@2
+      displayName: Build an image
+      inputs:
+        containerRegistry: '$(containerRegistry)'
+        repository: '$(imageRepository)'
+        command: 'build'
+        Dockerfile: 'AzDevopsRepo/dockerfile'
+        buildContext: '$(appName)'
+        tags: |
+          $(tag)
+          latest
+    - task: Docker@2
+      displayName: 'Push an image'
+      inputs:
+        containerRegistry: '$(containerRegistry)'
+        repository: '$(imageRepository)'
+        command: 'push'
+        tags: |
+          $(tag)
+          latest
+- stage: Deploy
+  displayName: Deploy
+  jobs:  
+  - job: Deploy
+    displayName: Deploy
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: KubernetesManifest@0
+        inputs:
+          action: 'deploy'
+          kubernetesServiceConnection: $(kubernetesServiceConnection)
+          namespace: '$(namespace)'
+          manifests: |
+            $(Build.SourcesDirectory)/manifests/Kubernetes_Deployment.yml
+            $(Build.SourcesDirectory)/manifests/ingress.yml
+            $(Build.SourcesDirectory)/manifests/service_binding.yml
+          containers: '$(containerRegistry)/$(imageRepository):$(tag)'
+          rolloutStatusTimeout: '9999'

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: App-Name
+  labels:
+    app: App-Name
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: App-Name
+  template:
+    metadata:
+      labels:
+        app: App-Name
+    spec:
+      terminationGracePeriodSeconds: 15
+      containers:
+      - name: App
+        image: yourregistry.azurecr.io/App:latest
+        ports:
+        - name: smtp
+          containerPort: 1025
+        - name: http
+          containerPort: 8025
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1024Mi
+          limits:
+            cpu: 1000m
+            memory: 2048Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: App-Name 
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8025
+    name: http
+  selector:
+    app: App-Name
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: App-smtp
+  labels:
+    app: App-Name
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+spec:
+    type: LoadBalancer
+    ports:
+    - port: 25
+      targetPort: smtp
+      protocol: TCP
+    selector:
+        app: App-Name
